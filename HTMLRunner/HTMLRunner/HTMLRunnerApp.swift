@@ -13,7 +13,7 @@ struct HTMLRunnerApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(store)
-                .onOpenURL { url in store.openURL(url) }
+                .onOpenURL { url in store.open(url: url) }
         }
     }
 }
