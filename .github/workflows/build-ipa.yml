@@ -34,7 +34,7 @@ jobs:
   # ---------------------------------------------------------------------------
   locate:
     name: Locate project
-    runs-on: ubuntu-latest
+    runs-on: macos-15
     outputs:
       path: ${{ steps.find.outputs.path }}
       has_asc_key: ${{ steps.check.outputs.has_asc_key }}
