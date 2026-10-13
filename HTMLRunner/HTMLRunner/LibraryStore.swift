@@ -79,6 +79,11 @@ final class LibraryStore: ObservableObject {
     //   htmlrunner://open?id=<uuid>            item is already in the shared store
     //   htmlrunner://import?payload=<base64url> items arrive inside the URL itself
 
+    /// Alias for `open(url:)`. Inside `.onOpenURL { url in ... }` the closure
+    /// parameter shadows the `URL` type, so an explicit name reads better —
+    /// both spellings are kept so either call site compiles.
+    func openURL(_ url: URL) { open(url: url) }
+
     func open(url: URL) {
         guard url.scheme == SharedStore.urlScheme else { return }
         refresh()

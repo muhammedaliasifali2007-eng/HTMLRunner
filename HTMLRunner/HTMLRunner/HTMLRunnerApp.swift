@@ -11,9 +11,9 @@ struct HTMLRunnerApp: App {
 
     var body: some Scene {
         WindowGroup {
-            LibraryView()
+            ContentView()
                 .environmentObject(store)
-                .onOpenURL { url in store.open(url: url) }
+                .onOpenURL { url in store.openURL(url) }
         }
     }
 }

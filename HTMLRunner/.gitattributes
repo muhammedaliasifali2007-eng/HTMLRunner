@@ -1,0 +1,43 @@
+# Line-ending policy for this repository.
+#
+# "text=auto eol=lf" tells Git: store every text file with Unix (LF) line
+# endings, and check it out with LF too - on Windows, macOS or Linux.
+# That silences the editor warning you may have seen ("this file uses LF, but
+# Git is configured to convert them to CRLF") and keeps diffs small.
+#
+# It also protects the shell script below: shell scripts with Windows (CRLF)
+# endings fail on macOS/Linux with  /bin/bash^M: bad interpreter  or
+#  $'\r': command not found .
+* text=auto eol=lf
+
+# ---------------------------------------------------------------------------
+# Xcode project files: LF, always. Xcode itself writes LF.
+# ---------------------------------------------------------------------------
+*.pbxproj   text eol=lf
+*.xcscheme  text eol=lf
+*.plist     text eol=lf
+*.entitlements text eol=lf
+*.swift     text eol=lf
+*.yml       text eol=lf
+*.md        text eol=lf
+*.sh        text eol=lf
+
+# Windows-only scripts keep their native endings (none in the project today).
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+
+# ---------------------------------------------------------------------------
+# Binary files - never convert, never diff.
+# ---------------------------------------------------------------------------
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.pdf       binary
+*.zip       binary
+*.ipa       binary
+*.xcuserstate binary
+
+# Keep generated/vendored folders out of diffs.
+build/      export-ignore
+tools/__pycache__/ export-ignore

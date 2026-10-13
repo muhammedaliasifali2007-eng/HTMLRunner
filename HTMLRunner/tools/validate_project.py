@@ -85,6 +85,20 @@ def main():
         for name in unexpected:
             check(name not in sources, f"{name} is NOT compiled into it")
 
+    print("\nDependencies (must not form a cycle)")
+    def dep_names(target):
+        names = []
+        for key in getattr(target, "dependencies", []) or []:
+            dep = project.objects[key]
+            proxy = project.objects[dep.targetProxy]
+            names.append(project.objects[proxy.remoteGlobalIDString].name)
+        return names
+
+    app_deps = dep_names(project.get_target_by_name("HTMLRunner"))
+    ext_deps = dep_names(project.get_target_by_name("Open in HTML Runner"))
+    check(app_deps == ["Open in HTML Runner"], f"app depends on the extension (got {app_deps})")
+    check(ext_deps == [], f"extension depends on nothing (got {ext_deps}) — no cycle")
+
     print("\nEmbedding")
     app_target = project.get_target_by_name("HTMLRunner")
     embed = None
@@ -150,8 +164,22 @@ def main():
         app_plist = plistlib.load(open(os.path.join(ROOT, "HTMLRunner/Info.plist"), "rb"))
         schemes = app_plist["CFBundleURLTypes"][0]["CFBundleURLSchemes"]
         check("htmlrunner" in schemes, "app registers the htmlrunner:// URL scheme")
+        for key in ("CFBundleIdentifier", "CFBundleExecutable", "CFBundleName",
+                    "CFBundleShortVersionString", "CFBundleVersion"):
+            check(key in app_plist, f"app Info.plist has {key}")
+        check(app_plist.get("UILaunchScreen") is not None, "app Info.plist declares UILaunchScreen")
     except Exception as exc:  # noqa: BLE001
         check(False, f"app Info.plist unreadable: {exc}")
+
+    try:
+        ext_plist = plistlib.load(open(os.path.join(ROOT, "ShareExtension/Info.plist"), "rb"))
+        for key in ("CFBundleIdentifier", "CFBundleExecutable", "CFBundleName",
+                    "CFBundleShortVersionString", "CFBundleVersion"):
+            check(key in ext_plist, f"extension Info.plist has {key}")
+        check(ext_plist.get("CFBundlePackageType") == "XPC!", "extension CFBundlePackageType is XPC!")
+        check("NSExtension" in ext_plist, "extension Info.plist declares NSExtension")
+    except Exception as exc:  # noqa: BLE001
+        check(False, f"extension Info.plist unreadable: {exc}")
 
     for path in ("HTMLRunner/HTMLRunner.entitlements", "ShareExtension/ShareExtension.entitlements"):
         try:

@@ -34,6 +34,7 @@ HTMLRunner/
 ├── tools/
 │   ├── make_pbxproj.py              regenerates project.pbxproj
 │   ├── validate_project.py          parses & sanity-checks the project
+│   ├── check_symbols.py             flags references to types that don't exist
 │   └── make_ipa.sh                  macOS one-command signed .ipa
 └── README.md
 ```
@@ -137,6 +138,9 @@ practical routes, one of which needs no Mac at all:
 
 ### Route 1 — build in the cloud (no Mac)
 
+> Uploading is its own walkthrough: see **[UPLOAD-GUIDE.md](UPLOAD-GUIDE.md)** (three ways, click by click).
+
+
 1. Push this folder to a GitHub repo (private is fine).
    `.github/workflows/build-ipa.yml` is already included.
 2. GitHub → **Actions → Build IPA → Run workflow** (it also runs on every push).
@@ -225,6 +229,7 @@ Codemagic, Bitrise.
 ```bash
 python3 tools/make_pbxproj.py      # writes HTMLRunner.xcodeproj/project.pbxproj
 python3 tools/validate_project.py  # parses it back and checks targets/membership/plists
+python3 tools/check_symbols.py     # catches "cannot find 'X' in scope" before CI does
 ```
 
 Add a file to `FILES` (and to `APP_SOURCES` / `EXT_SOURCES`) in `tools/make_pbxproj.py` and re-run both.

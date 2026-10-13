@@ -30,8 +30,8 @@
 			isa = PBXContainerItemProxy;
 			containerPortal = AA0000000000000000000001 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = AA0000000000000000000020;
-			remoteInfo = HTMLRunner;
+			remoteGlobalIDString = AA0000000000000000000021;
+			remoteInfo = "Open in HTML Runner";
 		};
 /* End PBXContainerItemProxy section */
 
@@ -161,6 +161,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				AA0000000000000000000050 /* PBXTargetDependency */,
 			);
 			name = HTMLRunner;
 			productName = HTMLRunner;
@@ -178,7 +179,6 @@
 			buildRules = (
 			);
 			dependencies = (
-				AA0000000000000000000050 /* PBXTargetDependency */,
 			);
 			name = "Open in HTML Runner";
 			productName = "Open in HTML Runner";

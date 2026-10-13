@@ -1,0 +1,89 @@
+# Minimal build workflow — paste at .github/workflows/build-ipa.yml
+# (repo ROOT, not inside a subfolder). Produces HTMLRunner-unsigned.ipa.
+#
+# v1.1: prints the repository contents and the Xcode project's schemes before
+# building, and fails with a readable message if project.pbxproj is missing.
+# Works whether the project is at the repo root or nested inside folders.
+
+name: Build IPA
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build-ipa:
+    name: Build unsigned IPA
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Locate project
+        id: project
+        run: |
+          set -euo pipefail
+          echo "--- repository contents ---"
+          find . -maxdepth 4 -not -path "./.git*" | sort | head -n 200
+          echo
+
+          PROJ=$(find . -type d -name "*.xcodeproj" -not -path "./.git/*" | sort | head -n 1 || true)
+          if [ -z "$PROJ" ]; then
+            ZIP=$(find . -maxdepth 3 -name "*.zip" -not -path "./.git/*" | sort | head -n 1 || true)
+            if [ -n "$ZIP" ]; then
+              echo "No .xcodeproj found - unpacking $ZIP"
+              rm -rf "$RUNNER_TEMP/src" && mkdir -p "$RUNNER_TEMP/src"
+              unzip -q -o "$ZIP" -d "$RUNNER_TEMP/src"
+              PROJ=$(find "$RUNNER_TEMP/src" -type d -name "*.xcodeproj" | sort | head -n 1 || true)
+            fi
+          fi
+          if [ -z "$PROJ" ]; then
+            echo "::error::No .xcodeproj found in the repo. Upload the project files, or upload HTMLRunner-iOS.zip."
+            exit 1
+          fi
+          echo "Using project: $PROJ"
+
+          if [ ! -f "$PROJ/project.pbxproj" ]; then
+            echo "::error::$PROJ exists but project.pbxproj is MISSING - that file did not get uploaded. Add it and re-run."
+            exit 1
+          fi
+          ls -la "$PROJ"
+
+          echo "--- schemes and targets ---"
+          xcodebuild -list -project "$PROJ" || true
+
+          echo "path=$PROJ" >> "$GITHUB_OUTPUT"
+
+      - name: Build (signing disabled)
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project "${{ steps.project.outputs.path }}" \
+            -scheme HTMLRunner \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            build
+
+      - name: Package IPA
+        run: |
+          set -euo pipefail
+          APP=$(find build/Build/Products -maxdepth 2 -name "HTMLRunner.app" -type d | head -n 1)
+          test -n "$APP" || { echo "::error::build produced no HTMLRunner.app"; exit 1; }
+          rm -rf pkg && mkdir -p pkg/Payload
+          cp -R "$APP" pkg/Payload/
+          cd pkg && zip -qry ../HTMLRunner-unsigned.ipa Payload && cd ..
+          ls -lh HTMLRunner-unsigned.ipa
+          unzip -l HTMLRunner-unsigned.ipa | grep -i "PlugIns/" || echo "warning: share extension not found in the ipa"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HTMLRunner-unsigned-ipa
+          path: HTMLRunner-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
