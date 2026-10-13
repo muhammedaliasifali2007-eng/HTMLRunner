@@ -1,0 +1,205 @@
+name: Build IPA
+
+# Produces an installable .ipa without needing a Mac of your own.
+#
+# • unsigned-ipa  — runs on every push. Output: HTMLRunner-unsigned.ipa
+#                   Install it by re-signing with Sideloadly / AltStore / TrollStore
+#                   and your own Apple ID (free accounts work, 7-day expiry).
+#
+# • signed-ipa    — runs only if you add an App Store Connect API key as secrets.
+#                   Output: HTMLRunner.ipa, already signed, installable directly
+#                   (and optionally uploaded to TestFlight).
+#                   Add these repo secrets: ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8,
+#                   TEAM_ID, plus a repo *variable* BUNDLE_IDS_OK if you've changed
+#                   the bundle identifiers from com.example.htmlrunner*.
+#
+# Both jobs are also startable by hand from the Actions tab (workflow_dispatch).
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      export_method:
+        description: "Signed build export method"
+        type: choice
+        default: debugging
+        options: [debugging, release-testing, app-store-connect]
+      upload_to_testflight:
+        description: "Upload the signed build to TestFlight"
+        type: boolean
+        default: false
+
+jobs:
+  # ---------------------------------------------------------------------------
+  locate:
+    name: Locate project
+    runs-on: ubuntu-latest
+    outputs:
+      path: ${{ steps.find.outputs.path }}
+      has_asc_key: ${{ steps.check.outputs.has_asc_key }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Find the .xcodeproj
+        id: find
+        run: |
+          set -euo pipefail
+          PROJ=$(find "$GITHUB_WORKSPACE" -maxdepth 3 -name "HTMLRunner.xcodeproj" -type d | head -n 1)
+          test -n "$PROJ" || { echo "HTMLRunner.xcodeproj not found"; exit 1; }
+          echo "path=$PROJ" >> "$GITHUB_OUTPUT"
+          echo "project: $PROJ"
+      - name: Do we have an App Store Connect API key?
+        id: check
+        env:
+          KEY: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          if [ -n "${KEY:-}" ]; then echo "has_asc_key=true" >> "$GITHUB_OUTPUT"; else echo "has_asc_key=false" >> "$GITHUB_OUTPUT"; fi
+
+  # ---------------------------------------------------------------------------
+  # Route 1 — unsigned IPA. No Apple account, no secrets, no Mac.
+  # ---------------------------------------------------------------------------
+  unsigned-ipa:
+    name: Unsigned IPA (Sideloadly / AltStore)
+    needs: locate
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: xcodebuild -version
+
+      - name: Build (signing disabled)
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project "${{ needs.locate.outputs.path }}" \
+            -scheme HTMLRunner \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$GITHUB_WORKSPACE/build" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            build
+
+      - name: Package into Payload/
+        run: |
+          set -euo pipefail
+          APP="$GITHUB_WORKSPACE/build/Build/Products/Release-iphoneos/HTMLRunner.app"
+          test -d "$APP" || { echo "no app bundle produced"; exit 1; }
+          rm -rf "$GITHUB_WORKSPACE/pkg"
+          mkdir -p "$GITHUB_WORKSPACE/pkg/Payload"
+          cp -R "$APP" "$GITHUB_WORKSPACE/pkg/Payload/"
+          cd "$GITHUB_WORKSPACE/pkg"
+          zip -qry "$GITHUB_WORKSPACE/HTMLRunner-unsigned.ipa" Payload
+          echo "--- contents ---"
+          unzip -l "$GITHUB_WORKSPACE/HTMLRunner-unsigned.ipa" | grep -iE "appex|HTMLRunner.app/$|\.appex/$" || true
+          ls -lh "$GITHUB_WORKSPACE/HTMLRunner-unsigned.ipa"
+
+      - name: Check the extension is embedded
+        run: |
+          set -euo pipefail
+          if unzip -l "$GITHUB_WORKSPACE/HTMLRunner-unsigned.ipa" | grep -q "PlugIns/Open in HTML Runner.appex"; then
+            echo "✓ share extension embedded"
+          else
+            echo "✗ share extension missing — the share-sheet entry would not appear"; exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HTMLRunner-unsigned-ipa
+          path: HTMLRunner-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Route 2 — signed IPA (needs a paid Apple Developer account + ASC API key).
+  # Automatic signing on CI: the API key lets xcodebuild create/fetch the
+  # provisioning profiles for both the app and its extension by itself.
+  # ---------------------------------------------------------------------------
+  signed-ipa:
+    name: Signed IPA
+    needs: [locate, unsigned-ipa]
+    if: needs.locate.outputs.has_asc_key == 'true'
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write App Store Connect API key
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/keys"
+          echo "$ASC_KEY_P8" > "$RUNNER_TEMP/keys/AuthKey.p8"
+
+      - name: Archive
+        env:
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+          KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project "${{ needs.locate.outputs.path }}" \
+            -scheme HTMLRunner \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/HTMLRunner.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey.p8" \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            archive
+
+      - name: Export IPA
+        env:
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+        run: |
+          set -euo pipefail
+          METHOD="${{ github.event.inputs.export_method || 'debugging' }}"
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>$METHOD</string>
+            <key>teamID</key><string>$TEAM_ID</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>stripSwiftSymbols</key><true/>
+            <key>uploadSymbols</key><true/>
+            <key>compileBitcode</key><false/>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/HTMLRunner.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$GITHUB_WORKSPACE/signed" \
+            -allowProvisioningUpdates
+          ls -lh "$GITHUB_WORKSPACE/signed"
+          test -f "$GITHUB_WORKSPACE/signed/HTMLRunner.ipa"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HTMLRunner-signed-ipa
+          path: signed/HTMLRunner.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload to TestFlight
+        if: ${{ github.event.inputs.upload_to_testflight == 'true' }}
+        env:
+          KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          cp "$RUNNER_TEMP/keys/AuthKey.p8" "$HOME/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8"
+          xcrun altool --upload-app --type ios \
+            --file "$GITHUB_WORKSPACE/signed/HTMLRunner.ipa" \
+            --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID" --output-format json
